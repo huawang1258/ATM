@@ -1,5 +1,8 @@
 <template>
-  <div :class="['token-card', { 'menu-open': showCopyMenu || showCheckMenu, 'highlighted': isHighlighted }]" @click="handleClickOutside">
+  <div
+    :class="['token-card', { 'menu-open': showCopyMenu || showCheckMenu, 'highlighted': isHighlighted, 'selected': isSelected, 'selectable': selectionMode }]"
+    @click="handleCardClick"
+  >
     <!-- 状态指示器 -->
     <div v-if="showStatusIndicator" class="status-indicator">
       <span
@@ -14,7 +17,7 @@
         v-if="hasStatusBadge"
         :class="['status-badge', getStatusClass(token.ban_status), { clickable: isBannedWithSuspensions }]"
         @click="handleStatusClick"
-        :title="isBannedWithSuspensions ? $t('tokenCard.clickToViewDetails') : ''"
+        :title="getStatusTooltip(token.ban_status)"
       >
         {{ getStatusText(token.ban_status) }}
       </span>
@@ -259,6 +262,22 @@
                     <span class="editor-name">CodeBuddy</span>
                   </div>
                 </button>
+                <button @click="handleEditorClick('vim')" class="editor-option vim-option">
+                  <div class="editor-icon">
+                    <img :src="editorIcons.vim" alt="Vim" width="32" height="32" />
+                  </div>
+                  <div class="editor-info">
+                    <span class="editor-name">Vim</span>
+                  </div>
+                </button>
+                <button @click="handleEditorClick('auggie')" class="editor-option auggie-option">
+                  <div class="editor-icon">
+                    <img :src="editorIcons.auggie" alt="Auggie" width="32" height="32" />
+                  </div>
+                  <div class="editor-info">
+                    <span class="editor-name">Auggie</span>
+                  </div>
+                </button>
               </div>
             </div>
 
@@ -463,6 +482,13 @@
       />
     </Transition>
   </Teleport>
+
+  <!-- 复制选择弹窗 -->
+  <CopyChoiceModal
+    :show="showCopyChoiceModal"
+    @close="showCopyChoiceModal = false"
+    @choice="handleCopyChoice"
+  />
 </template>
 
 <script setup>
@@ -471,6 +497,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { useI18n } from 'vue-i18n'
 import ExternalLinkDialog from './ExternalLinkDialog.vue'
 import CreditUsageModal from './CreditUsageModal.vue'
+import CopyChoiceModal from './CopyChoiceModal.vue'
 
 const { t } = useI18n()
 
@@ -488,11 +515,19 @@ const props = defineProps({
   isHighlighted: {
     type: Boolean,
     default: false
+  },
+  selectionMode: {
+    type: Boolean,
+    default: false
+  },
+  isSelected: {
+    type: Boolean,
+    default: false
   }
 })
 
 // Emits
-const emit = defineEmits(['delete', 'edit', 'token-updated'])
+const emit = defineEmits(['delete', 'edit', 'token-updated', 'toggle-selection'])
 
 // Reactive data
 const isLoadingPortalInfo = ref(false)
@@ -507,6 +542,7 @@ const showSuspensionsModal = ref(false)
 const showTraeVersionDialog = ref(false)
 const showCopyMenu = ref(false)
 const showCreditUsageModal = ref(false)
+const showCopyChoiceModal = ref(false)
 
 const DEFAULT_TAG_COLOR = '#f97316'
 
@@ -551,8 +587,32 @@ const hasStatusBadge = computed(() => {
 
 const showStatusIndicator = computed(() => hasTag.value || hasStatusBadge.value)
 
+// 当前主题
+const currentTheme = ref('light')
+
+// 监听主题变化
+const updateTheme = () => {
+  currentTheme.value = document.documentElement.dataset.theme || 'light'
+}
+
+onMounted(() => {
+  updateTheme()
+  // 监听主题变化
+  const observer = new MutationObserver(() => {
+    updateTheme()
+  })
+  observer.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['data-theme']
+  })
+  // 清理
+  onUnmounted(() => {
+    observer.disconnect()
+  })
+})
+
 // 图标映射
-const editorIcons = {
+const editorIcons = computed(() => ({
   vscode: '/icons/vscode.svg',
   cursor: '/icons/cursor.svg',
   kiro: '/icons/kiro.svg',
@@ -561,6 +621,8 @@ const editorIcons = {
   qoder: '/icons/qoder.svg',
   vscodium: '/icons/vscodium.svg',
   codebuddy: '/icons/codebuddy.svg',
+  vim: '/icons/vim.svg',
+  auggie: currentTheme.value === 'dark' ? '/icons/auggie_dark.svg' : '/icons/auggie.svg',
   idea: '/icons/idea.svg',
   pycharm: '/icons/pycharm.svg',
   goland: '/icons/goland.svg',
@@ -573,7 +635,7 @@ const editorIcons = {
   rubymine: '/icons/rubymine.svg',
   aqua: '/icons/aqua.svg',
   androidstudio: '/icons/androidstudio.svg'
-}
+}))
 
 // 判断是否为封禁状态且有 suspensions 数据
 const isBannedWithSuspensions = computed(() => {
@@ -623,7 +685,7 @@ const maskedEmail = computed(() => {
 
   // 如果用户名太短，直接返回原邮箱
   if (username.length <= 3) {
-    return email
+    return username + '@FuckAugment.com'
   }
 
   let maskedUsername
@@ -639,7 +701,8 @@ const maskedEmail = computed(() => {
     maskedUsername = username.substring(0, frontKeep) + '****' + username.substring(username.length - backKeep)
   }
 
-  return maskedUsername + '@' + domain
+  // 显示假域名 FuckAugment.com，但复制时使用真实邮箱
+  return maskedUsername + '@FuckAugment.com'
 })
 
 // Portal余额显示相关计算属性
@@ -740,6 +803,14 @@ const getStatusText = (status) => {
   }
 }
 
+// 获取状态提示文本
+const getStatusTooltip = (status) => {
+  if (status === 'SUSPENDED') {
+    return t('tokenCard.clickToViewDetails')
+  }
+  return ''
+}
+
 
 // Methods
 const formatDate = (dateString) => {
@@ -803,12 +874,36 @@ const copyTenantUrl = () => copyWithNotification(
   'messages.copyTenantUrlFailed'
 )
 
-// 复制邮箱备注
-const copyEmailNote = () => copyWithNotification(
-  props.token.email_note,
-  'messages.emailNoteCopied',
-  'messages.copyEmailNoteFailed'
-)
+// 复制邮箱备注 - 打开选择弹窗
+const copyEmailNote = () => {
+  showCopyChoiceModal.value = true
+}
+
+// 处理复制选择
+const handleCopyChoice = (type) => {
+  if (type === 'email') {
+    copyWithNotification(
+      props.token.email_note,
+      'messages.emailNoteCopied',
+      'messages.copyEmailNoteFailed'
+    )
+  } else if (type === 'session') {
+    if (!props.token.auth_session) {
+      window.$notify.warning(t('messages.noAuthSession'))
+      return
+    }
+    copyWithNotification(
+      props.token.auth_session,
+      'messages.authSessionCopied',
+      'messages.copyAuthSessionFailed'
+    )
+  }
+}
+
+// 切换选中状态
+const toggleSelection = () => {
+  emit('toggle-selection', props.token.id)
+}
 
 // 复制Portal URL
 const copyPortalUrl = () => {
@@ -909,8 +1004,17 @@ const handleKeydown = (event) => {
   }
 }
 
-// 点击外部关闭复制菜单和检测菜单
-const handleClickOutside = () => {
+// 处理卡片点击
+const handleCardClick = (event) => {
+  // 如果是多选模式,点击卡片切换选中状态
+  if (props.selectionMode) {
+    // 阻止事件冒泡
+    event.stopPropagation()
+    toggleSelection()
+    return
+  }
+
+  // 非多选模式,关闭菜单
   if (showCopyMenu.value) {
     showCopyMenu.value = false
   }
@@ -935,6 +1039,8 @@ const editorNames = {
   'qoder': 'Qoder',
   'vscodium': 'VSCodium',
   'codebuddy': 'CodeBuddy',
+  'vim': 'Vim',
+  'auggie': 'Auggie',
   'idea': 'IntelliJ IDEA',
   'pycharm': 'PyCharm',
   'goland': 'GoLand',
@@ -1008,6 +1114,34 @@ const createJetBrainsTokenFile = async (editorType) => {
   }
 }
 
+// 配置 Vim Augment 插件
+const configureVimAugment = async () => {
+  try {
+    const result = await invoke('configure_vim_augment', {
+      accessToken: props.token.access_token,
+      tenantUrl: props.token.tenant_url
+    })
+
+    return { success: true, filePath: result }
+  } catch (error) {
+    return { success: false, error: error.toString() }
+  }
+}
+
+// 配置 Auggie 编辑器
+const configureAuggie = async () => {
+  try {
+    const result = await invoke('configure_auggie', {
+      accessToken: props.token.access_token,
+      tenantUrl: props.token.tenant_url
+    })
+
+    return { success: true, filePath: result }
+  } catch (error) {
+    return { success: false, error: error.toString() }
+  }
+}
+
 // 处理编辑器链接点击事件
 const handleEditorClick = async (editorType) => {
   // 如果是 Trae，显示版本选择对话框
@@ -1019,7 +1153,25 @@ const handleEditorClick = async (editorType) => {
   try {
     const editorName = editorNames[editorType] || editorType
 
-    if (jetbrainsEditors.has(editorType)) {
+    if (editorType === 'vim') {
+      // 处理 Vim 配置
+      const result = await configureVimAugment()
+
+      if (result.success) {
+        window.$notify.success(t('messages.vimConfigSuccess'))
+      } else {
+        window.$notify.error(t('messages.vimConfigFailed') + ': ' + result.error)
+      }
+    } else if (editorType === 'auggie') {
+      // 处理 Auggie 配置
+      const result = await configureAuggie()
+
+      if (result.success) {
+        window.$notify.success(t('messages.auggieConfigSuccess'))
+      } else {
+        window.$notify.error(t('messages.auggieConfigFailed') + ': ' + result.error)
+      }
+    } else if (jetbrainsEditors.has(editorType)) {
       const result = await createJetBrainsTokenFile(editorType)
 
       if (result.success) {
@@ -1261,6 +1413,13 @@ const checkAccountStatus = async (showNotification = true) => {
         }
       }
 
+      // 比对并更新 portal_url（如果有）
+      if (result.portal_url && props.token.portal_url !== result.portal_url) {
+        props.token.portal_url = result.portal_url
+        hasChanges = true
+        console.log(`Updated portal_url for token ${props.token.id}:`, result.portal_url)
+      }
+
       // 比对并更新 email_note（如果有）
       if (result.email_note && props.token.email_note !== result.email_note) {
         props.token.email_note = result.email_note
@@ -1354,10 +1513,16 @@ onMounted(async () => {
       error: null
     }
   }
-  // 禁用自动刷新，避免清空搜索时大量重新挂载并发起请求
-  // if (props.token.portal_url) {
-  //   checkAccountStatus(false)
-  // }
+
+  // 只对有 auth_session 但没有 portal_url 的 token 自动检查状态
+  // 排除已封禁(SUSPENDED)和已过期(EXPIRED)的 token
+  if (props.token.auth_session &&
+      !props.token.portal_url &&
+      props.token.ban_status !== 'SUSPENDED' &&
+      props.token.ban_status !== 'EXPIRED') {
+    console.log('TokenCard: Auto-checking status for token with auth_session but no portal_url:', props.token.id)
+    await checkAccountStatus(false)  // 静默检查
+  }
 
   // 添加事件监听器
   document.addEventListener('keydown', handleKeydown)
@@ -1412,6 +1577,44 @@ defineExpose({
 
 .token-card.menu-open {
   z-index: 1000;
+}
+
+/* 多选模式下的卡片样式 */
+.token-card.selectable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.token-card.selectable:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+/* 选中状态 */
+.token-card.selected {
+  border-color: var(--color-primary, #3b82f6);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3), 0 4px 12px rgba(59, 130, 246, 0.2);
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  transform: scale(1.02);
+}
+
+.token-card.selected::before {
+  content: '✓';
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  width: 24px;
+  height: 24px;
+  background: var(--color-primary, #3b82f6);
+  color: white;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 16px;
+  z-index: 10;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 /* 高亮动画 */
@@ -1478,6 +1681,25 @@ defineExpose({
   background: var(--color-danger-surface, #f8d7da);
   color: var(--color-danger-text, #721c24);
   border: 1px solid var(--color-danger-border, #f5c6cb);
+  animation: bounce 1.5s ease-in-out infinite;
+  cursor: pointer;
+}
+
+/* 已封禁标签悬停效果 */
+.status-badge.banned:hover {
+  transform: scale(1.2) translateY(-4px);
+  box-shadow: 0 4px 12px rgba(220, 53, 69, 0.4);
+  animation-play-state: paused;
+}
+
+/* 跳动动画 */
+@keyframes bounce {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
 }
 
 .status-badge.invalid {
@@ -2285,7 +2507,9 @@ defineExpose({
 .windsurf-option .editor-icon,
 .qoder-option .editor-icon,
 .vscodium-option .editor-icon,
-.codebuddy-option .editor-icon {
+.codebuddy-option .editor-icon,
+.vim-option .editor-icon,
+.auggie-option .editor-icon {
   background: var(--color-info-surface, #f0f9ff);
   border-color: var(--color-info-surface, #e0f2fe);
 }

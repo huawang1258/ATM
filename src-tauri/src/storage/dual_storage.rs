@@ -29,6 +29,10 @@ impl DualStorage {
         self.postgres_storage.is_some()
     }
 
+    pub fn get_postgres_storage(&self) -> Option<Arc<PostgreSQLStorage>> {
+        self.postgres_storage.clone()
+    }
+
     async fn sync_to_both_storages(&self, token: &TokenData) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // 总是保存到本地存储
         if let Err(e) = self.local_storage.save_token(token).await {

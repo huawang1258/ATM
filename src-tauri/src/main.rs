@@ -14,7 +14,7 @@ mod proxy_config;
 mod proxy_helper;
 
 use augment_oauth::{create_augment_oauth_state, generate_augment_authorize_url, complete_augment_oauth_flow, check_account_ban_status, batch_check_account_status, extract_token_from_session, get_batch_credit_consumption_with_app_session, AugmentOAuthState, AugmentTokenResponse, AccountStatus, TokenInfo, TokenStatusResult, BatchCreditConsumptionResponse};
-use augment_user_info::{exchange_auth_session_for_app_session, fetch_app_subscription};
+use augment_user_info::exchange_auth_session_for_app_session;
 use bookmarks::{BookmarkManager, Bookmark};
 use outlook_manager::{OutlookManager, OutlookCredentials, EmailListResponse, EmailDetailsResponse, AccountStatus as OutlookAccountStatus, AccountInfo};
 use database::{DatabaseConfig, DatabaseConfigManager, DatabaseManager};
@@ -89,10 +89,10 @@ async fn generate_auth_url(state: State<'_, AppState>) -> Result<String, String>
     let augment_oauth_state = create_augment_oauth_state();
     let auth_url = generate_augment_authorize_url(&augment_oauth_state)
         .map_err(|e| format!("Failed to generate auth URL: {}", e))?;
-    
+
     // Store the Augment OAuth state
     *state.augment_oauth_state.lock().unwrap() = Some(augment_oauth_state);
-    
+
     Ok(auth_url)
 }
 
@@ -101,10 +101,10 @@ async fn generate_augment_auth_url(state: State<'_, AppState>) -> Result<String,
     let augment_oauth_state = create_augment_oauth_state();
     let auth_url = generate_augment_authorize_url(&augment_oauth_state)
         .map_err(|e| format!("Failed to generate Augment auth URL: {}", e))?;
-    
+
     // Store the Augment OAuth state
     *state.augment_oauth_state.lock().unwrap() = Some(augment_oauth_state);
-    
+
     Ok(auth_url)
 }
 
@@ -146,8 +146,9 @@ async fn check_account_status(token: String, tenant_url: String) -> Result<Accou
 #[tauri::command]
 async fn batch_check_tokens_status(
     tokens: Vec<TokenInfo>,
+    state: State<'_, AppState>,
 ) -> Result<Vec<TokenStatusResult>, String> {
-    batch_check_account_status(tokens)
+    batch_check_account_status(tokens, state.app_session_cache.clone())
         .await
         .map_err(|e| format!("Failed to batch check tokens status: {}", e))
 }
@@ -156,11 +157,9 @@ async fn batch_check_tokens_status(
 #[tauri::command]
 async fn fetch_batch_credit_consumption(
     auth_session: String,
-    fetch_portal_url: Option<bool>,  // 是否获取 portal_url,默认为 true
     state: State<'_, AppState>,
 ) -> Result<BatchCreditConsumptionResponse, String> {
-    let should_fetch_portal_url = fetch_portal_url.unwrap_or(true);
-    println!("fetch_batch_credit_consumption called with fetch_portal_url: {:?}, should_fetch: {}", fetch_portal_url, should_fetch_portal_url);
+    println!("fetch_batch_credit_consumption called");
     // 1. 检查缓存中是否有有效的 app_session
     let cached_app_session = {
         let cache = state.app_session_cache.lock().unwrap();
@@ -173,22 +172,8 @@ async fn fetch_batch_credit_consumption(
 
         // 尝试使用缓存的 app_session 获取数据
         match get_batch_credit_consumption_with_app_session(&app_session).await {
-            Ok(mut result) => {
+            Ok(result) => {
                 println!("Successfully fetched credit data with cached app_session");
-
-                // 只有在需要时才获取 portal_url
-                if should_fetch_portal_url {
-                    println!("Fetching portal_url from subscription API...");
-                    if let Ok(subscription) = fetch_app_subscription(&app_session).await {
-                        println!("Got portal_url: {:?}", subscription.portal_url);
-                        result.portal_url = subscription.portal_url;
-                    } else {
-                        println!("Failed to fetch subscription info");
-                    }
-                } else {
-                    println!("Skipping portal_url fetch (already exists)");
-                }
-
                 return Ok(result);
             }
             Err(e) => {
@@ -217,20 +202,7 @@ async fn fetch_batch_credit_consumption(
     }
 
     // 5. 使用新的 app_session 获取数据
-    let mut result = get_batch_credit_consumption_with_app_session(&app_session).await?;
-
-    // 6. 只有在需要时才获取 portal_url
-    if should_fetch_portal_url {
-        println!("Fetching portal_url from subscription API (new session)...");
-        if let Ok(subscription) = fetch_app_subscription(&app_session).await {
-            println!("Got portal_url: {:?}", subscription.portal_url);
-            result.portal_url = subscription.portal_url;
-        } else {
-            println!("Failed to fetch subscription info");
-        }
-    } else {
-        println!("Skipping portal_url fetch (already exists)");
-    }
+    let result = get_batch_credit_consumption_with_app_session(&app_session).await?;
 
     Ok(result)
 }
@@ -384,8 +356,6 @@ struct TokenFromSessionResponse {
     access_token: String,
     tenant_url: String,
     email: Option<String>,           // 从 get-models API 获取的邮箱
-    credits_balance: Option<i32>,    // 从 get-credit-info 获取的余额
-    expiry_date: Option<String>,     // 从 get-credit-info 获取的过期时间
 }
 
 // 内部函数,不发送进度事件,使用缓存的 app_session
@@ -393,29 +363,25 @@ async fn add_token_from_session_internal_with_cache(
     session: &str,
     _state: &AppState,
 ) -> Result<TokenFromSessionResponse, String> {
-    // 从 session 提取 token (包含 email, credits_balance, expiry_date)
+    // 从 session 提取 token (包含 email)
     let token_response = extract_token_from_session(session).await?;
 
     Ok(TokenFromSessionResponse {
         access_token: token_response.access_token,
         tenant_url: token_response.tenant_url,
         email: token_response.email,
-        credits_balance: token_response.credits_balance,
-        expiry_date: token_response.expiry_date,
     })
 }
 
 // 内部函数,不发送进度事件（保留用于向后兼容）
 async fn add_token_from_session_internal(session: &str) -> Result<TokenFromSessionResponse, String> {
-    // 从 session 提取 token (包含 email, credits_balance, expiry_date)
+    // 从 session 提取 token (包含 email)
     let token_response = extract_token_from_session(session).await?;
 
     Ok(TokenFromSessionResponse {
         access_token: token_response.access_token,
         tenant_url: token_response.tenant_url,
         email: token_response.email,
-        credits_balance: token_response.credits_balance,
-        expiry_date: token_response.expiry_date,
     })
 }
 
@@ -425,7 +391,7 @@ async fn add_token_from_session(
     app: tauri::AppHandle,
     _state: State<'_, AppState>,
 ) -> Result<TokenFromSessionResponse, String> {
-    // 从 session 提取 token (包含 email, credits_balance, expiry_date)
+    // 从 session 提取 token (包含 email)
     let _ = app.emit("session-import-progress", "sessionImportExtractingToken");
     let token_response = extract_token_from_session(&session).await?;
 
@@ -435,8 +401,6 @@ async fn add_token_from_session(
         access_token: token_response.access_token,
         tenant_url: token_response.tenant_url,
         email: token_response.email,
-        credits_balance: token_response.credits_balance,
-        expiry_date: token_response.expiry_date,
     })
 }
 
@@ -1091,6 +1055,12 @@ async fn open_internal_browser(
                     showCopyNotification('⚠️ 未找到可填充的字段', '#f59e0b');
                 }
             }, 300);
+
+            // 获取提交按钮
+            const submitButton = document.querySelector('button[type="submit"]');
+            if (submitButton) {
+                submitButton.click();
+            }
         }
 
         // 创建导航栏的函数
@@ -1527,6 +1497,133 @@ async fn create_jetbrains_token_file(
 }
 
 #[tauri::command]
+async fn configure_vim_augment(
+    access_token: String,
+    tenant_url: String,
+) -> Result<String, String> {
+    use std::fs;
+    use std::env;
+    use std::path::PathBuf;
+
+    // 获取用户主目录
+    let home_dir = env::var("USERPROFILE")
+        .or_else(|_| env::var("HOME"))
+        .map_err(|_| "Failed to get home directory".to_string())?;
+
+    // 配置文件路径 (所有系统统一使用 .local/share/vim-augment)
+    let vim_augment_dir = PathBuf::from(&home_dir).join(".local").join("share").join("vim-augment");
+
+    // 确保目录存在
+    fs::create_dir_all(&vim_augment_dir)
+        .map_err(|e| format!("Failed to create vim-augment directory: {}", e))?;
+
+    let secrets_path = vim_augment_dir.join("secrets.json");
+
+    // 如果文件已存在，先删除
+    if secrets_path.exists() {
+        fs::remove_file(&secrets_path)
+            .map_err(|e| format!("Failed to remove existing secrets.json: {}", e))?;
+    }
+
+    // 构建内层 JSON 对象
+    let inner_json = serde_json::json!({
+        "accessToken": access_token,
+        "tenantURL": tenant_url,
+        "scopes": ["email"]
+    });
+
+    // 将内层 JSON 转换为字符串（这会自动转义引号）
+    let inner_json_str = serde_json::to_string(&inner_json)
+        .map_err(|e| format!("Failed to serialize inner JSON: {}", e))?;
+
+    // 构建外层 JSON 对象
+    let outer_json = serde_json::json!({
+        "augment.sessions": inner_json_str
+    });
+
+    // 将外层 JSON 转换为格式化的字符串
+    let json_content = serde_json::to_string_pretty(&outer_json)
+        .map_err(|e| format!("Failed to serialize outer JSON: {}", e))?;
+
+    // 写入文件
+    fs::write(&secrets_path, json_content)
+        .map_err(|e| format!("Failed to write secrets.json: {}", e))?;
+
+    // 在 Unix 系统上设置文件权限
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&secrets_path)
+            .map_err(|e| format!("Failed to get file metadata: {}", e))?
+            .permissions();
+        perms.set_mode(0o600); // 仅所有者可读写
+        fs::set_permissions(&secrets_path, perms)
+            .map_err(|e| format!("Failed to set file permissions: {}", e))?;
+    }
+
+    Ok(secrets_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+async fn configure_auggie(
+    access_token: String,
+    tenant_url: String,
+) -> Result<String, String> {
+    use std::fs;
+    use std::env;
+    use std::path::PathBuf;
+
+    // 获取用户主目录
+    let home_dir = env::var("USERPROFILE")
+        .or_else(|_| env::var("HOME"))
+        .map_err(|_| "Failed to get home directory".to_string())?;
+
+    // 确定 .augment 目录路径
+    let augment_dir = PathBuf::from(&home_dir).join(".augment");
+
+    // 确保目录存在
+    fs::create_dir_all(&augment_dir)
+        .map_err(|e| format!("Failed to create .augment directory: {}", e))?;
+
+    let session_path = augment_dir.join("session.json");
+
+    // 如果文件已存在，先删除
+    if session_path.exists() {
+        fs::remove_file(&session_path)
+            .map_err(|e| format!("Failed to remove existing session.json: {}", e))?;
+    }
+
+    // 构建 JSON 对象
+    let session_json = serde_json::json!({
+        "accessToken": access_token,
+        "tenantURL": tenant_url,
+        "scopes": ["read", "write"]
+    });
+
+    // 将 JSON 转换为格式化的字符串
+    let json_content = serde_json::to_string_pretty(&session_json)
+        .map_err(|e| format!("Failed to serialize session JSON: {}", e))?;
+
+    // 写入文件
+    fs::write(&session_path, json_content)
+        .map_err(|e| format!("Failed to write session.json: {}", e))?;
+
+    // 在 Unix 系统上设置文件权限
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&session_path)
+            .map_err(|e| format!("Failed to get file metadata: {}", e))?
+            .permissions();
+        perms.set_mode(0o600); // 仅所有者可读写
+        fs::set_permissions(&session_path, perms)
+            .map_err(|e| format!("Failed to set file permissions: {}", e))?;
+    }
+
+    Ok(session_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
 async fn open_editor_with_protocol(
     app: tauri::AppHandle,
     protocol_url: String,
@@ -1825,6 +1922,114 @@ async fn bidirectional_sync_tokens_with_data(
     storage_manager.bidirectional_sync_with_tokens(tokens).await
         .map_err(|e| format!("Sync failed: {}", e))
 }
+
+#[tauri::command]
+async fn force_push_tokens_to_database(
+    tokens_json: String,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let storage_manager = {
+        let guard = state.storage_manager.lock().unwrap();
+        guard.clone().ok_or("Storage manager not initialized")?
+    };
+
+    // 解析前端传入的 tokens JSON
+    let local_tokens: Vec<storage::TokenData> = serde_json::from_str(&tokens_json)
+        .map_err(|e| format!("Failed to parse tokens JSON: {}", e))?;
+
+    // 获取数据库存储
+    let postgres = storage_manager.get_postgres_storage()
+        .ok_or("Database storage not available")?;
+
+    if !postgres.is_available().await {
+        return Err("Database not available".into());
+    }
+
+    // 加载数据库中的所有tokens
+    let db_tokens = postgres.load_tokens().await
+        .map_err(|e| format!("Failed to load database tokens: {}", e))?;
+
+    // 创建一个 session -> db_token 的映射
+    use std::collections::HashMap;
+    let mut session_map: HashMap<String, storage::TokenData> = HashMap::new();
+    for db_token in db_tokens {
+        if let Some(session) = &db_token.auth_session {
+            if !session.trim().is_empty() {
+                session_map.insert(session.clone(), db_token);
+            }
+        }
+    }
+
+    let mut updated_count = 0;
+    let mut inserted_count = 0;
+    let mut errors = Vec::new();
+
+    // 遍历本地tokens
+    for local_token in local_tokens {
+        // 根据 auth_session 匹配
+        if let Some(session) = &local_token.auth_session {
+            if !session.trim().is_empty() {
+                // 有session，检查数据库中是否存在
+                if let Some(_db_token) = session_map.get(session) {
+                    // 匹配到了，用本地数据覆盖数据库
+                    match postgres.save_token(&local_token).await {
+                        Ok(_) => {
+                            updated_count += 1;
+                            eprintln!("✅ Updated token with session: {}", session);
+                        }
+                        Err(e) => {
+                            errors.push(format!("Failed to update token {}: {}", local_token.id, e));
+                            eprintln!("❌ Failed to update token {}: {}", local_token.id, e);
+                        }
+                    }
+                } else {
+                    // 没匹配到，插入新token
+                    match postgres.save_token(&local_token).await {
+                        Ok(_) => {
+                            inserted_count += 1;
+                            eprintln!("✅ Inserted new token with session: {}", session);
+                        }
+                        Err(e) => {
+                            errors.push(format!("Failed to insert token {}: {}", local_token.id, e));
+                            eprintln!("❌ Failed to insert token {}: {}", local_token.id, e);
+                        }
+                    }
+                }
+            } else {
+                // session为空，直接插入或更新（根据id）
+                match postgres.save_token(&local_token).await {
+                    Ok(_) => {
+                        inserted_count += 1;
+                        eprintln!("✅ Saved token without session: {}", local_token.id);
+                    }
+                    Err(e) => {
+                        errors.push(format!("Failed to save token {}: {}", local_token.id, e));
+                        eprintln!("❌ Failed to save token {}: {}", local_token.id, e);
+                    }
+                }
+            }
+        } else {
+            // 没有session，直接插入或更新（根据id）
+            match postgres.save_token(&local_token).await {
+                Ok(_) => {
+                    inserted_count += 1;
+                    eprintln!("✅ Saved token without session: {}", local_token.id);
+                }
+                Err(e) => {
+                    errors.push(format!("Failed to save token {}: {}", local_token.id, e));
+                    eprintln!("❌ Failed to save token {}: {}", local_token.id, e);
+                }
+            }
+        }
+    }
+
+    Ok(serde_json::json!({
+        "updated": updated_count,
+        "inserted": inserted_count,
+        "errors": errors
+    }))
+}
+
 
 #[tauri::command]
 async fn get_storage_status(
@@ -2239,6 +2444,8 @@ fn main() {
             open_data_folder,
             open_editor_with_protocol,
             create_jetbrains_token_file,
+            configure_vim_augment,
+            configure_auggie,
             // Outlook 邮箱管理命令
             outlook_save_credentials,
             outlook_get_all_accounts,
@@ -2268,6 +2475,7 @@ fn main() {
             delete_token,
             bidirectional_sync_tokens,
             bidirectional_sync_tokens_with_data,
+            force_push_tokens_to_database,
             get_storage_status,
             get_sync_status,
 
