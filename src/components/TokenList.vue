@@ -3065,6 +3065,12 @@ const batchGetCredits = async () => {
             window.$notify.warning(`⚠️ Token ${tokenNumber}${emailInfo} 获取失败: ${reason}`)
           }
 
+          // 6. 更新绑卡链接
+          if (checkResult.payment_method_link) {
+            updatedToken.payment_method_link = checkResult.payment_method_link
+            console.log(`✅ Token ${tokenNumber}${emailInfo} 获取绑卡链接成功`)
+          }
+
           // 🔥 更新 updated_at 时间戳，确保同步时使用最新数据
           updatedToken.updated_at = new Date().toISOString()
 
@@ -3743,6 +3749,13 @@ const checkPageAccountStatus = async () => {
         } else if (result.portal_error) {
           // 如果获取Portal信息失败，记录错误但不影响状态更新
           console.warn(`Failed to fetch portal info for token ${token.id}:`, result.portal_error)
+        }
+
+        // 比对并更新绑卡链接（如果有）
+        if (result.payment_method_link && token.payment_method_link !== result.payment_method_link) {
+          token.payment_method_link = result.payment_method_link
+          tokenHasChanges = true
+          console.log(`Updated token ${token.id} payment_method_link`)
         }
 
         // 比对并更新 email_note（如果有）

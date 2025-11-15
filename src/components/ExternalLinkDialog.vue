@@ -21,6 +21,15 @@
           </svg>
           {{ $t('dialogs.copyLink') }}
         </button>
+        <button v-if="showRefresh" @click="handleRefresh" class="dialog-btn refresh" :disabled="isRefreshing">
+          <svg v-if="!isRefreshing" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
+          </svg>
+          <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="spinning">
+            <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/>
+          </svg>
+          {{ $t('dialogs.refresh') }}
+        </button>
         <button @click="handleClose" class="dialog-btn cancel">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
             <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
@@ -55,11 +64,19 @@ const props = defineProps({
   browserTitle: {
     type: String,
     required: true
+  },
+  showRefresh: {
+    type: Boolean,
+    default: false
+  },
+  isRefreshing: {
+    type: Boolean,
+    default: false
   }
 })
 
 // Emits
-const emit = defineEmits(['close'])
+const emit = defineEmits(['close', 'refresh'])
 
 // Methods
 const handleClose = () => {
@@ -104,6 +121,10 @@ const handleInternalOpen = async () => {
     console.error('Failed to open URL internally:', error)
     window.$notify.error(t('messages.openUrlFailed'))
   }
+}
+
+const handleRefresh = () => {
+  emit('refresh')
 }
 </script>
 
@@ -206,6 +227,27 @@ const handleInternalOpen = async () => {
   border-color: var(--color-success-border, #81c784);
 }
 
+.dialog-btn.refresh {
+  background: #fff4e6;
+  color: #f57c00;
+  border-color: #ffcc80;
+}
+
+.dialog-btn.refresh:hover {
+  background: #ffe0b2;
+  border-color: #ffb74d;
+}
+
+.dialog-btn.refresh:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.dialog-btn.refresh:disabled:hover {
+  transform: none;
+  box-shadow: none;
+}
+
 .dialog-btn.cancel {
   background: var(--color-rose-surface, #fce4ec);
   color: var(--color-rose-text, #c2185b);
@@ -215,6 +257,20 @@ const handleInternalOpen = async () => {
 .dialog-btn.cancel:hover {
   background: var(--color-rose-border, #f8bbd9);
   border-color: var(--color-rose-hover, #f48fb1);
+}
+
+/* 旋转动画 */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spinning {
+  animation: spin 1s linear infinite;
 }
 
 /* 黑暗主题下的按钮样式 */
@@ -249,6 +305,17 @@ const handleInternalOpen = async () => {
 [data-theme='dark'] .dialog-btn.internal:hover {
   background: rgba(34, 197, 94, 0.3);
   border-color: rgba(110, 231, 183, 0.6);
+}
+
+[data-theme='dark'] .dialog-btn.refresh {
+  background: rgba(251, 146, 60, 0.2);
+  color: #fdba74;
+  border-color: rgba(253, 186, 116, 0.4);
+}
+
+[data-theme='dark'] .dialog-btn.refresh:hover {
+  background: rgba(251, 146, 60, 0.3);
+  border-color: rgba(251, 146, 60, 0.6);
 }
 
 [data-theme='dark'] .dialog-btn.cancel {

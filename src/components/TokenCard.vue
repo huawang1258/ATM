@@ -124,6 +124,12 @@
                 </svg>
                 <span>{{ $t('tokenCard.copyAuthSession') }}</span>
               </button>
+              <button v-if="token.auth_session" @click="handleCopyMenuClick('appSession')" class="copy-menu-item">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                </svg>
+                <span>{{ $t('tokenCard.copyAppSession') }}</span>
+              </button>
             </div>
           </Transition>
         </div>
@@ -166,6 +172,14 @@
         <button v-if="token.portal_url" @click="showPortalDialog = true" class="btn-action portal" :title="$t('tokenCard.openPortal')">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
             <path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.11 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/>
+          </svg>
+        </button>
+        <button v-if="token.portal_url" @click="handlePaymentClick" class="btn-action payment" :title="$t('tokenCard.openPayment')" :disabled="isLoadingPaymentLink">
+          <svg v-if="!isLoadingPaymentLink" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M20 4H4c-1.11 0-1.99.89-1.99 2L2 18c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V6c0-1.11-.89-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z"/>
+          </svg>
+          <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="currentColor" class="spinning">
+            <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/>
           </svg>
         </button>
         <button @click="$emit('edit', token)" class="btn-action edit" :title="$t('tokenCard.editToken')">
@@ -396,6 +410,17 @@
     @close="showPortalDialog = false"
   />
 
+  <ExternalLinkDialog
+    :show="showPaymentDialog"
+    :title="$t('dialogs.selectOpenMethod')"
+    :url="token.payment_method_link || ''"
+    :browser-title="$t('tokenCard.paymentMethodTitle')"
+    :show-refresh="true"
+    :is-refreshing="isLoadingPaymentLink"
+    @close="showPaymentDialog = false"
+    @refresh="handleRefreshPaymentLink"
+  />
+
   <!-- Suspensions 详情模态框 -->
   <Teleport to="body">
     <Transition name="modal" appear>
@@ -537,6 +562,8 @@ const isEmailHovered = ref(false)
 const showEditorModal = ref(false)
 const isModalClosing = ref(false)
 const showPortalDialog = ref(false)
+const showPaymentDialog = ref(false)
+const isLoadingPaymentLink = ref(false)
 const showCheckMenu = ref(false)
 const showSuspensionsModal = ref(false)
 const showTraeVersionDialog = ref(false)
@@ -927,6 +954,36 @@ const copyAuthSession = () => {
   )
 }
 
+// 复制App Session
+const copyAppSession = async () => {
+  if (!props.token.auth_session) {
+    window.$notify.warning(t('messages.authSessionRequiredForAppSession'))
+    return
+  }
+
+  try {
+    window.$notify.info(t('messages.fetchingAppSession'))
+
+    // 调用后端API获取app_session
+    const result = await invoke('get_app_session_command', {
+      authSession: props.token.auth_session
+    })
+
+    if (result && result.app_session) {
+      copyWithNotification(
+        result.app_session,
+        'messages.appSessionCopied',
+        'messages.copyAppSessionFailed'
+      )
+    } else {
+      window.$notify.error(t('messages.appSessionFetchFailed'))
+    }
+  } catch (error) {
+    console.error('Failed to fetch app session:', error)
+    window.$notify.error(`${t('messages.appSessionFetchFailed')}: ${error}`)
+  }
+}
+
 // 导出Token为JSON
 const exportTokenAsJson = () => {
   const exportData = {
@@ -967,7 +1024,7 @@ const toggleCopyMenu = () => {
 }
 
 // 处理复制菜单项点击
-const handleCopyMenuClick = (type) => {
+const handleCopyMenuClick = async (type) => {
   showCopyMenu.value = false
   switch (type) {
     case 'token':
@@ -981,6 +1038,9 @@ const handleCopyMenuClick = (type) => {
       break
     case 'session':
       copyAuthSession()
+      break
+    case 'appSession':
+      await copyAppSession()
       break
   }
 }
@@ -1555,6 +1615,65 @@ const handleUpdatePortalUrl = (portalUrl) => {
   emit('token-updated')
 }
 
+// 获取绑卡链接的通用方法
+const fetchPaymentLink = async () => {
+  // 如果没有auth_session,提示用户
+  if (!props.token.auth_session) {
+    window.$notify.warning(t('messages.authSessionRequiredForPayment'))
+    return false
+  }
+
+  isLoadingPaymentLink.value = true
+  try {
+    window.$notify.info(t('messages.fetchingPaymentLink'))
+
+    // 调用后端API获取绑卡链接
+    const result = await invoke('fetch_payment_method_link_command', {
+      authSession: props.token.auth_session
+    })
+
+    if (result && result.payment_method_link) {
+      // 更新token对象
+      props.token.payment_method_link = result.payment_method_link
+
+      // 触发父组件保存
+      emit('token-updated')
+
+      window.$notify.success(t('messages.paymentLinkFetched'))
+      return true
+    } else {
+      window.$notify.error(t('messages.paymentLinkFetchFailed'))
+      return false
+    }
+  } catch (error) {
+    console.error('Failed to fetch payment method link:', error)
+    window.$notify.error(`${t('messages.paymentLinkFetchFailed')}: ${error}`)
+    return false
+  } finally {
+    isLoadingPaymentLink.value = false
+  }
+}
+
+// 处理绑卡按钮点击
+const handlePaymentClick = async () => {
+  // 如果已有绑卡链接,直接打开
+  if (props.token.payment_method_link) {
+    showPaymentDialog.value = true
+    return
+  }
+
+  // 获取绑卡链接
+  const success = await fetchPaymentLink()
+  if (success) {
+    showPaymentDialog.value = true
+  }
+}
+
+// 处理刷新绑卡链接
+const handleRefreshPaymentLink = async () => {
+  await fetchPaymentLink()
+}
+
 // 暴露方法给父组件
 defineExpose({
   refreshAccountStatus
@@ -1881,6 +2000,15 @@ defineExpose({
   border-color: rgba(59, 130, 246, 0.4);
 }
 
+[data-theme='dark'] .btn-action.payment {
+  color: #c4b5fd;
+}
+
+[data-theme='dark'] .btn-action.payment:hover {
+  background: rgba(124, 58, 237, 0.2);
+  border-color: rgba(124, 58, 237, 0.4);
+}
+
 [data-theme='dark'] .btn-action.edit {
   color: #86efac;
 }
@@ -2122,6 +2250,15 @@ defineExpose({
 .btn-action.portal:hover {
   background: rgba(37, 99, 235, 0.15);
   border-color: rgba(37, 99, 235, 0.3);
+}
+
+.btn-action.payment {
+  color: #7c3aed;
+}
+
+.btn-action.payment:hover {
+  background: rgba(124, 58, 237, 0.15);
+  border-color: rgba(124, 58, 237, 0.3);
 }
 
 .btn-action.edit {
@@ -2898,6 +3035,25 @@ defineExpose({
   background: var(--color-surface-soft, #f8fafc);
   box-shadow: 0 4px 12px rgba(59, 130, 246, 0.15);
   transform: translateY(-2px);
+}
+
+/* 旋转动画 */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spinning {
+  animation: spin 1s linear infinite;
+}
+
+.btn-action:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .version-option:active {

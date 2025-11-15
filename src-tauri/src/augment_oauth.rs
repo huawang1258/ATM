@@ -97,6 +97,7 @@ pub struct TokenStatusResult {
     pub suspensions: Option<serde_json::Value>, // 封禁详情（如果有）
     pub email_note: Option<String>, // 邮箱备注（如果获取到）
     pub portal_url: Option<String>, // Portal URL（如果获取到）
+    pub payment_method_link: Option<String>, // 绑卡链接（如果获取到）
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -414,6 +415,7 @@ pub async fn batch_check_account_status(
                         suspensions: None,
                         email_note: None,
                         portal_url: None,
+                        payment_method_link: None,
                     };
                 }
             };
@@ -509,11 +511,16 @@ pub async fn batch_check_account_status(
                     suspensions: suspensions_info,
                     email_note: None,  // 封禁账号不获取邮箱
                     portal_url: None,
+                    payment_method_link: None,
                 };
             }
 
             // 4. 如果没有 portal_url 但有 auth_session，尝试获取 portal_url
+            // 如果有 auth_session，尝试获取绑卡链接
             let mut fetched_portal_url = portal_url.clone();
+            let mut fetched_payment_method_link: Option<String> = None;
+
+            // 4.1 获取 portal_url (只在没有 portal_url 时)
             if fetched_portal_url.is_none() && auth_session.is_some() {
                 println!("No portal_url for token {:?}, attempting to fetch from auth_session", token_id);
 
@@ -528,6 +535,8 @@ pub async fn batch_check_account_status(
                     // 尝试使用缓存的 app_session
                     let app_session = if let Some(app_session) = cached_app_session {
                         println!("Using cached app_session for portal_url fetch");
+
+                        // 获取订阅信息
                         match crate::augment_user_info::fetch_app_subscription(&app_session).await {
                             Ok(subscription) => {
                                 fetched_portal_url = subscription.portal_url.clone();
@@ -536,13 +545,13 @@ pub async fn batch_check_account_status(
                                 } else {
                                     println!("Subscription response has no portal_url");
                                 }
-                                Some(app_session)
                             }
                             Err(e) => {
-                                println!("Cached app_session failed: {}, will refresh", e);
-                                None
+                                println!("Cached app_session failed for subscription: {}, will refresh", e);
                             }
                         }
+
+                        Some(app_session)
                     } else {
                         println!("No cached app_session found, will exchange auth_session");
                         None
@@ -579,6 +588,32 @@ pub async fn batch_check_account_status(
 
                     if let Some(ref url) = fetched_portal_url {
                         println!("Successfully fetched portal_url for token {:?}: {}", token_id, url);
+                    }
+                }
+            }
+
+            // 4.2 获取绑卡链接 (只要有 auth_session 就尝试获取)
+            if auth_session.is_some() {
+                if let Some(ref session) = auth_session {
+                    println!("Attempting to fetch payment_method_link for token {:?}", token_id);
+
+                    // 获取完整Cookie
+                    match crate::augment_user_info::exchange_auth_session_for_full_cookies(session).await {
+                        Ok(full_cookies) => {
+                            // 使用完整Cookie获取绑卡链接
+                            match crate::augment_user_info::fetch_payment_method_link(&full_cookies).await {
+                                Ok(link) => {
+                                    fetched_payment_method_link = Some(link.clone());
+                                    println!("✅ Successfully fetched payment_method_link for token {:?}: {}", token_id, link);
+                                }
+                                Err(e) => {
+                                    println!("❌ Failed to fetch payment_method_link for token {:?}: {}", token_id, e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            println!("❌ Failed to get full cookies for token {:?}: {}", token_id, e);
+                        }
                     }
                 }
             }
@@ -626,6 +661,7 @@ pub async fn batch_check_account_status(
                 suspensions: None,  // 正常情况下不需要 suspensions
                 email_note,
                 portal_url: fetched_portal_url,
+                payment_method_link: fetched_payment_method_link,
             }
         });
         
@@ -663,6 +699,7 @@ pub async fn batch_check_account_status(
                     suspensions: None,
                     email_note: None,
                     portal_url: None,
+                    payment_method_link: None,
                 });
             }
         }

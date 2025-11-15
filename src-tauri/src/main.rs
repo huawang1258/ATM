@@ -385,6 +385,43 @@ async fn add_token_from_session_internal(session: &str) -> Result<TokenFromSessi
     })
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct PaymentMethodLinkResult {
+    payment_method_link: String,
+}
+
+#[tauri::command]
+async fn fetch_payment_method_link_command(
+    auth_session: String,
+) -> Result<PaymentMethodLinkResult, String> {
+    // 1. 交换 auth_session 为完整的Cookie字符串
+    let full_cookies = augment_user_info::exchange_auth_session_for_full_cookies(&auth_session).await?;
+
+    // 2. 使用完整Cookie获取绑卡链接
+    let payment_link = augment_user_info::fetch_payment_method_link(&full_cookies).await?;
+
+    Ok(PaymentMethodLinkResult {
+        payment_method_link: payment_link,
+    })
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct AppSessionResult {
+    app_session: String,
+}
+
+#[tauri::command]
+async fn get_app_session_command(
+    auth_session: String,
+) -> Result<AppSessionResult, String> {
+    // 交换 auth_session 为 app_session
+    let app_session = augment_user_info::exchange_auth_session_for_app_session(&auth_session).await?;
+
+    Ok(AppSessionResult {
+        app_session,
+    })
+}
+
 #[tauri::command]
 async fn add_token_from_session(
     session: String,
@@ -2426,6 +2463,8 @@ fn main() {
             check_account_status,
             batch_check_tokens_status,
             fetch_batch_credit_consumption,
+            fetch_payment_method_link_command,
+            get_app_session_command,
             add_token_from_session,
             open_url,
             // 新的简化命令
