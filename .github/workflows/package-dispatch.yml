@@ -16,6 +16,7 @@ permissions:
 jobs:
   dispatch:
     runs-on: ubuntu-latest
+    environment: TAP_DISPATCH_TOKEN
     env:
       GH_TOKEN: ${{ secrets.TAP_DISPATCH_TOKEN }}
       TAG: ${{ github.event.inputs.tag || github.event.release.tag_name }}
