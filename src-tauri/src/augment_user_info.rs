@@ -32,6 +32,17 @@ pub struct PaymentMethodLinkResponse {
     pub url: String,
 }
 
+/// 账号绑卡状态信息
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PaymentInfo {
+    #[serde(rename = "hasPaymentMethod")]
+    pub has_payment_method: bool,
+    #[serde(rename = "paymentMethodBrand")]
+    pub payment_method_brand: Option<String>,
+    #[serde(rename = "paymentMethodLast4")]
+    pub payment_method_last4: Option<String>,
+}
+
 /// 通过 auth session 交换 app session
 /// 返回 _session 的值(保持原有行为,不影响其他功能)
 pub async fn exchange_auth_session_for_app_session(auth_session: &str) -> Result<String, String> {
@@ -186,9 +197,78 @@ pub async fn fetch_app_subscription(app_session: &str) -> Result<SubscriptionInf
         .map_err(|e| format!("Failed to parse subscription info: {}", e))
 }
 
+/// 检测账号是否已绑卡
+/// 参数 cookie_string: 完整的Cookie字符串,包含 _session 和其他cookies
+pub async fn fetch_payment_info(cookie_string: &str) -> Result<PaymentInfo, String> {
+    let client = create_proxy_client()?;
+
+    println!("🔍 [DEBUG] Fetching payment info...");
+
+    // 按照Apifox的格式: Cookie header的值是 "Cookie=_session=..."
+    let cookie_header_value = format!("Cookie={}", cookie_string);
+
+    let response = client
+        .get("https://app.augmentcode.com/api/payment")
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        .header("Cookie", cookie_header_value)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch payment info: {}", e))?;
+
+    let status_code = response.status();
+    println!("📡 [DEBUG] Payment info response status: {}", status_code);
+
+    let response_text = response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read payment info response: {}", e))?;
+
+    println!("📄 [DEBUG] Payment info response: {}", response_text);
+
+    if !status_code.is_success() {
+        return Err(format!("Payment info API returned error status {}: {}", status_code, response_text));
+    }
+
+    let payment_info: PaymentInfo = serde_json::from_str(&response_text)
+        .map_err(|e| format!("Failed to parse payment info: {}. Response was: {}", e, response_text))?;
+
+    Ok(payment_info)
+}
+
 /// 获取绑卡链接
 /// 参数 cookie_string: 完整的Cookie字符串,包含 _session 和其他cookies
+/// 🔥 会先检查是否已绑卡，如果已绑卡则直接返回错误
 pub async fn fetch_payment_method_link(cookie_string: &str) -> Result<String, String> {
+    // 🔥 前置检查：先检测是否已绑卡
+    println!("🔍 [DEBUG] Pre-check: Fetching payment info to check if already bound...");
+    match fetch_payment_info(cookie_string).await {
+        Ok(payment_info) => {
+            if payment_info.has_payment_method {
+                // 已绑卡，构建错误信息
+                let card_info = match (&payment_info.payment_method_brand, &payment_info.payment_method_last4) {
+                    (Some(brand), Some(last4)) => format!("{} ****{}", brand, last4),
+                    (Some(brand), None) => brand.clone(),
+                    (None, Some(last4)) => format!("****{}", last4),
+                    (None, None) => String::new(),
+                };
+
+                let error_msg = if card_info.is_empty() {
+                    "ALREADY_BINDCARD".to_string()
+                } else {
+                    format!("ALREADY_BINDCARD ({})", card_info)
+                };
+
+                println!("⚠️  [DEBUG] Already bound card detected via payment info API: {}", error_msg);
+                return Err(error_msg);
+            }
+            println!("✅ [DEBUG] No payment method bound, proceeding to fetch payment link...");
+        }
+        Err(e) => {
+            // 检查失败，但仍尝试获取绑卡链接（可能是API暂时不可用）
+            println!("⚠️  [DEBUG] Failed to check payment info (will try anyway): {}", e);
+        }
+    }
+
     // 使用 ProxyClient，自动处理 Edge Function
     let client = create_proxy_client()?;
 
@@ -213,7 +293,8 @@ pub async fn fetch_payment_method_link(cookie_string: &str) -> Result<String, St
         .await
         .map_err(|e| format!("Failed to fetch payment method link: {}", e))?;
 
-    println!("📡 [DEBUG] Response status: {}", response.status());
+    let status_code = response.status();
+    println!("📡 [DEBUG] Response status: {}", status_code);
 
     // 先获取响应文本,打印出来看看
     let response_text = response
@@ -222,6 +303,54 @@ pub async fn fetch_payment_method_link(cookie_string: &str) -> Result<String, St
         .map_err(|e| format!("Failed to read response text: {}", e))?;
 
     println!("📄 [DEBUG] Response body: {}", response_text);
+
+    // 🔥 检查是否已绑卡（优先检查）
+    // 检查响应体中是否包含已绑卡的关键词
+    let response_lower = response_text.to_lowercase();
+    if response_lower.contains("already") && response_lower.contains("payment")
+        || response_lower.contains("already has a payment method")
+        || response_lower.contains("payment method already exists")
+        || response_lower.contains("已绑卡")
+        || response_lower.contains("已经绑定") {
+
+        // 尝试从响应中提取卡片信息
+        // 可能的格式: {"error": "Already has payment method: Visa ending in 1234"}
+        let card_info = if let Ok(json_value) = serde_json::from_str::<Value>(&response_text) {
+            if let Some(error_msg) = json_value.get("error").and_then(|v| v.as_str()) {
+                // 尝试提取卡片信息
+                if let Some(idx) = error_msg.find(':') {
+                    Some(error_msg[idx+1..].trim().to_string())
+                } else {
+                    None
+                }
+            } else if let Some(message) = json_value.get("message").and_then(|v| v.as_str()) {
+                if let Some(idx) = message.find(':') {
+                    Some(message[idx+1..].trim().to_string())
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // 返回已绑卡错误
+        let error_msg = if let Some(info) = card_info {
+            format!("ALREADY_BINDCARD ({})", info)
+        } else {
+            "ALREADY_BINDCARD".to_string()
+        };
+
+        println!("⚠️  [DEBUG] Already bound card detected: {}", error_msg);
+        return Err(error_msg);
+    }
+
+    // 检查HTTP状态码
+    if !status_code.is_success() {
+        return Err(format!("Server returned error status {}: {}", status_code, response_text));
+    }
 
     // 尝试解析JSON
     let payment_response: PaymentMethodLinkResponse = serde_json::from_str(&response_text)

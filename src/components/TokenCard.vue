@@ -1631,6 +1631,14 @@ const handleUpdatePortalUrl = (portalUrl) => {
 
 // 获取绑卡链接的通用方法
 const fetchPaymentLink = async () => {
+  // 🔥 优先检查是否已绑卡（前端状态）
+  if (hasPaymentMethod.value) {
+    window.$notify.warning(t('messages.alreadyBindCard'))
+    // 关闭对话框
+    showPaymentDialog.value = false
+    return false
+  }
+
   // 如果没有auth_session,提示用户
   if (!props.token.auth_session) {
     window.$notify.warning(t('messages.authSessionRequiredForPayment'))
