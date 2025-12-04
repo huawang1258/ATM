@@ -315,15 +315,41 @@
                 <div class="filter-dropdown">
                   <button
                     class="filter-btn"
-                    :class="{ active: filterMode === 'abnormal' }"
-                    @click.stop="filterMode = filterMode === 'abnormal' ? 'all' : 'abnormal'"
-                    :title="filterMode === 'abnormal' ? $t('tokenList.filterAll') : $t('tokenList.filterAbnormal')"
+                    :class="{ active: filterMode !== 'all' }"
+                    @click.stop="showFilterMenu = !showFilterMenu"
+                    :title="$t('tokenList.filter')"
                   >
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
                       <path d="M3 4a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v2.586a1 1 0 0 1-.293.707l-6.414 6.414a1 1 0 0 0-.293.707V17l-4 4v-6.586a1 1 0 0 0-.293-.707L3.293 7.293A1 1 0 0 1 3 6.586V4z"/>
                     </svg>
-                    <span>{{ filterMode === 'abnormal' ? $t('tokenList.filterAbnormal') : $t('tokenList.filterAll') }}</span>
+                    <span>{{ filterModeLabel }}</span>
                   </button>
+
+                  <!-- 筛选下拉菜单 -->
+                  <Transition name="dropdown">
+                    <div v-if="showFilterMenu" class="filter-menu" @click.stop>
+                      <div class="filter-menu-item" :class="{ active: filterMode === 'all' }" @click="setFilterMode('all')">
+                        <span class="filter-icon">📋</span>
+                        <span>{{ $t('tokenList.filterAll') }}</span>
+                      </div>
+                      <div class="filter-menu-item" :class="{ active: filterMode === 'normal' }" @click="setFilterMode('normal')">
+                        <span class="filter-icon">✅</span>
+                        <span>{{ $t('tokenList.filterNormal') }}</span>
+                      </div>
+                      <div class="filter-menu-item" :class="{ active: filterMode === 'abnormal' }" @click="setFilterMode('abnormal')">
+                        <span class="filter-icon">⚠️</span>
+                        <span>{{ $t('tokenList.filterAbnormal') }}</span>
+                      </div>
+                      <div class="filter-menu-item" :class="{ active: filterMode === 'bindcard' }" @click="setFilterMode('bindcard')">
+                        <span class="filter-icon">💳</span>
+                        <span>{{ $t('tokenList.filterBindCard') }}</span>
+                      </div>
+                      <div class="filter-menu-item" :class="{ active: filterMode === 'unbindcard' }" @click="setFilterMode('unbindcard')">
+                        <span class="filter-icon">🔓</span>
+                        <span>{{ $t('tokenList.filterUnbindCard') }}</span>
+                      </div>
+                    </div>
+                  </Transition>
                 </div>
 
                 <!-- 余额筛选按钮 -->
@@ -1047,7 +1073,8 @@ const showRefreshOptions = ref(false)
 const refreshMode = ref('current') // 'current' = 当前页, 'all' = 全部
 
 // 过滤状态管理
-const filterMode = ref('all') // 'all' = 全部, 'abnormal' = 只看异常
+const filterMode = ref('all') // 'all' = 全部, 'normal' = 正常, 'abnormal' = 异常, 'bindcard' = 已绑卡, 'unbindcard' = 未绑卡
+const showFilterMenu = ref(false) // 筛选下拉菜单是否显示
 
 // 余额筛选状态管理
 const balanceFilterEnabled = ref(false) // 是否启用余额筛选
@@ -1340,18 +1367,54 @@ const matchStatusKeyword = (banStatus, query) => {
   return keywords.some(keyword => keyword.includes(lowerQuery))
 }
 
+// 筛选模式标签
+const filterModeLabel = computed(() => {
+  switch (filterMode.value) {
+    case 'all': return t('tokenList.filterAll')
+    case 'normal': return t('tokenList.filterNormal')
+    case 'abnormal': return t('tokenList.filterAbnormal')
+    case 'bindcard': return t('tokenList.filterBindCard')
+    case 'unbindcard': return t('tokenList.filterUnbindCard')
+    default: return t('tokenList.filterAll')
+  }
+})
+
+// 设置筛选模式
+const setFilterMode = (mode) => {
+  filterMode.value = mode
+  showFilterMenu.value = false
+  currentPage.value = 1 // 重置到第一页
+}
+
 // 过滤后的tokens计算属性（搜索 + 排序 + 状态过滤 + 余额过滤）
 const filteredTokens = computed(() => {
   let result = sortedTokens.value
 
   // 应用状态过滤 - 与 TokenCard 的显示逻辑保持一致
-  if (filterMode.value === 'abnormal') {
-    result = result.filter(token => {
+  switch (filterMode.value) {
+    case 'abnormal':
       // 异常状态只包括：SUSPENDED、EXPIRED、INVALID_TOKEN
-      // 其他状态（ERROR、UNAUTHORIZED 等）在显示时默认为 'active'，所以不过滤为异常
-      const abnormalStatuses = ['SUSPENDED', 'EXPIRED', 'INVALID_TOKEN']
-      return abnormalStatuses.includes(token.ban_status)
-    })
+      result = result.filter(token => {
+        const abnormalStatuses = ['SUSPENDED', 'EXPIRED', 'INVALID_TOKEN']
+        return abnormalStatuses.includes(token.ban_status)
+      })
+      break
+    case 'normal':
+      // 正常状态：不在异常列表中的
+      result = result.filter(token => {
+        const abnormalStatuses = ['SUSPENDED', 'EXPIRED', 'INVALID_TOKEN']
+        return !abnormalStatuses.includes(token.ban_status)
+      })
+      break
+    case 'bindcard':
+      // 已绑卡：has_payment_method 为 true
+      result = result.filter(token => token.has_payment_method === true)
+      break
+    case 'unbindcard':
+      // 未绑卡：has_payment_method 不为 true（包括 false、null、undefined）
+      result = result.filter(token => token.has_payment_method !== true)
+      break
+    // 'all' 不需要过滤
   }
 
   // 应用余额范围过滤
@@ -1707,16 +1770,24 @@ const quickFilterByCredits = (filterType) => {
   window.$notify.info('已应用额度筛选')
 }
 
-// 处理模态框内容点击 (关闭排序菜单)
+// 处理模态框内容点击 (关闭排序菜单和筛选菜单)
 const handleModalContentClick = (event) => {
-  if (!showSortMenu.value) return
-
-  // 检查点击目标是否在排序下拉菜单内
   const target = event.target
-  const sortDropdown = document.querySelector('.sort-dropdown')
 
-  if (sortDropdown && !sortDropdown.contains(target)) {
-    showSortMenu.value = false
+  // 关闭排序菜单
+  if (showSortMenu.value) {
+    const sortDropdown = document.querySelector('.sort-dropdown')
+    if (sortDropdown && !sortDropdown.contains(target)) {
+      showSortMenu.value = false
+    }
+  }
+
+  // 关闭筛选菜单
+  if (showFilterMenu.value) {
+    const filterDropdown = document.querySelector('.filter-dropdown')
+    if (filterDropdown && !filterDropdown.contains(target)) {
+      showFilterMenu.value = false
+    }
   }
 }
 
@@ -6755,6 +6826,66 @@ defineExpose({
 [data-theme='dark'] .filter-btn.active {
   background: rgba(251, 191, 36, 0.2);
   border-color: #fbbf24;
+  color: #fbbf24;
+}
+
+/* 筛选下拉菜单 */
+.filter-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  min-width: 180px;
+  z-index: 1000;
+  overflow: hidden;
+}
+
+.filter-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  color: #374151;
+  font-size: 14px;
+}
+
+.filter-menu-item:hover {
+  background: #f3f4f6;
+}
+
+.filter-menu-item.active {
+  background: #fef3c7;
+  color: #92400e;
+  font-weight: 500;
+}
+
+.filter-icon {
+  font-size: 16px;
+  width: 20px;
+  text-align: center;
+}
+
+[data-theme='dark'] .filter-menu {
+  background: #1f2937;
+  border-color: #374151;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+[data-theme='dark'] .filter-menu-item {
+  color: #e5e7eb;
+}
+
+[data-theme='dark'] .filter-menu-item:hover {
+  background: #374151;
+}
+
+[data-theme='dark'] .filter-menu-item.active {
+  background: rgba(251, 191, 36, 0.2);
   color: #fbbf24;
 }
 

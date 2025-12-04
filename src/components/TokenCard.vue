@@ -174,9 +174,20 @@
             <path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.11 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/>
           </svg>
         </button>
-        <button v-if="token.portal_url" @click="handlePaymentClick" class="btn-action payment" :title="$t('tokenCard.openPayment')" :disabled="isLoadingPaymentLink">
-          <svg v-if="!isLoadingPaymentLink" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+        <button
+          v-if="token.portal_url"
+          @click="handlePaymentClick"
+          :class="['btn-action', 'payment', { 'already-bindcard': hasPaymentMethod }]"
+          :title="hasPaymentMethod ? $t('tokenCard.alreadyBindCard') : $t('tokenCard.openPayment')"
+          :disabled="isLoadingPaymentLink || hasPaymentMethod"
+        >
+          <svg v-if="!isLoadingPaymentLink && !hasPaymentMethod" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
             <path d="M20 4H4c-1.11 0-1.99.89-1.99 2L2 18c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V6c0-1.11-.89-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z"/>
+          </svg>
+          <!-- 已绑卡图标：带勾的卡片 -->
+          <svg v-else-if="hasPaymentMethod" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M20 4H4c-1.11 0-1.99.89-1.99 2L2 18c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V6c0-1.11-.89-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z"/>
+            <path d="M9 16.17L5.83 13l-1.42 1.41L9 19 19 9l-1.41-1.41z" transform="translate(0, -3) scale(0.6)" fill="currentColor"/>
           </svg>
           <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="currentColor" class="spinning">
             <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/>
@@ -613,6 +624,9 @@ const hasStatusBadge = computed(() => {
 })
 
 const showStatusIndicator = computed(() => hasTag.value || hasStatusBadge.value)
+
+// 是否已绑卡
+const hasPaymentMethod = computed(() => props.token.has_payment_method === true)
 
 // 当前主题
 const currentTheme = ref('light')
@@ -1647,6 +1661,27 @@ const fetchPaymentLink = async () => {
     }
   } catch (error) {
     console.error('Failed to fetch payment method link:', error)
+    const errorStr = String(error)
+    // 检查是否是已绑卡错误
+    if (errorStr.includes('ALREADY_BINDCARD')) {
+      // 提取卡片信息（如果有）
+      const cardInfoMatch = errorStr.match(/ALREADY_BINDCARD\s*\(([^)]+)\)/)
+      const cardInfo = cardInfoMatch ? cardInfoMatch[1] : ''
+      const message = cardInfo
+        ? t('messages.alreadyBindCard') + `: ${cardInfo}`
+        : t('messages.alreadyBindCard')
+      window.$notify.warning(message)
+
+      // 🔥 更新绑卡状态，触发按钮置灰
+      props.token.has_payment_method = true
+      // 清除绑卡链接（已绑卡不需要了）
+      props.token.payment_method_link = null
+      // 关闭对话框
+      showPaymentDialog.value = false
+      // 触发父组件保存
+      emit('token-updated')
+      return false
+    }
     window.$notify.error(`${t('messages.paymentLinkFetchFailed')}: ${error}`)
     return false
   } finally {
@@ -1656,6 +1691,12 @@ const fetchPaymentLink = async () => {
 
 // 处理绑卡按钮点击
 const handlePaymentClick = async () => {
+  // 如果已绑卡，不处理
+  if (hasPaymentMethod.value) {
+    window.$notify.warning(t('messages.alreadyBindCard'))
+    return
+  }
+
   // 如果已有绑卡链接,直接打开
   if (props.token.payment_method_link) {
     showPaymentDialog.value = true
@@ -2009,6 +2050,18 @@ defineExpose({
   border-color: rgba(124, 58, 237, 0.4);
 }
 
+/* 黑暗模式 - 已绑卡按钮样式 */
+[data-theme='dark'] .btn-action.payment.already-bindcard {
+  color: #6ee7b7;
+  opacity: 0.7;
+}
+
+[data-theme='dark'] .btn-action.payment.already-bindcard:hover {
+  background: rgba(16, 185, 129, 0.15);
+  border-color: rgba(16, 185, 129, 0.25);
+  transform: none;
+}
+
 [data-theme='dark'] .btn-action.edit {
   color: #86efac;
 }
@@ -2259,6 +2312,19 @@ defineExpose({
 .btn-action.payment:hover {
   background: rgba(124, 58, 237, 0.15);
   border-color: rgba(124, 58, 237, 0.3);
+}
+
+/* 已绑卡按钮样式 */
+.btn-action.payment.already-bindcard {
+  color: #10b981;
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.btn-action.payment.already-bindcard:hover {
+  background: rgba(16, 185, 129, 0.1);
+  border-color: rgba(16, 185, 129, 0.2);
+  transform: none;
 }
 
 .btn-action.edit {
