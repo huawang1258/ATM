@@ -133,42 +133,19 @@
             </div>
           </Transition>
         </div>
-        <div class="check-menu-wrapper">
-          <button
-            @click="checkAccountStatus"
-            @contextmenu.prevent="showCheckMenu = !showCheckMenu"
-            :class="['btn-action', 'status-check', {
-              loading: isCheckingStatus || (isBatchChecking && !token.skip_check),
-              disabled: token.skip_check
-            }]"
-            :disabled="isCheckingStatus || (isBatchChecking && !token.skip_check)"
-            :title="token.skip_check ? $t('tokenCard.checkDisabled') : $t('tokenCard.checkAccountStatus')"
-          >
-            <svg v-if="!isCheckingStatus && !(isBatchChecking && !token.skip_check) && !token.skip_check" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
-            </svg>
-            <!-- 禁用检测时显示暂停图标 -->
-            <svg v-else-if="!isCheckingStatus && !(isBatchChecking && !token.skip_check) && token.skip_check" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
-            </svg>
-            <div v-else-if="isCheckingStatus || (isBatchChecking && !token.skip_check)" class="loading-spinner"></div>
-          </button>
-          <Transition name="dropdown">
-            <div v-if="showCheckMenu" class="check-dropdown" @click.stop>
-              <button @click="toggleSkipCheck" class="check-menu-item">
-                <!-- 禁用检测图标 - 暂停 -->
-                <svg v-if="!token.skip_check" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
-                </svg>
-                <!-- 启用检测图标 - 播放 -->
-                <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M8 5v14l11-7z"/>
-                </svg>
-                <span>{{ token.skip_check ? $t('tokenCard.enableCheck') : $t('tokenCard.disableCheck') }}</span>
-              </button>
-            </div>
-          </Transition>
-        </div>
+        <button
+          @click="checkAccountStatus"
+          :class="['btn-action', 'status-check', {
+            loading: isCheckingStatus || isBatchChecking
+          }]"
+          :disabled="isCheckingStatus || isBatchChecking"
+          :title="$t('tokenCard.checkAccountStatus')"
+        >
+          <svg v-if="!isCheckingStatus && !isBatchChecking" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
+          </svg>
+          <div v-else class="loading-spinner"></div>
+        </button>
         <button v-if="token.portal_url" @click="showPortalDialog = true" class="btn-action portal" :title="$t('tokenCard.openPortal')">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
             <path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.11 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/>
@@ -191,6 +168,16 @@
           </svg>
           <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="currentColor" class="spinning">
             <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/>
+          </svg>
+        </button>
+        <button
+          v-if="token.auth_session"
+          @click="showTeamManager = true"
+          class="btn-action team"
+          :title="$t('tokenCard.teamManagement')"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
           </svg>
         </button>
         <button @click="$emit('edit', token)" class="btn-action edit" :title="$t('tokenCard.editToken')">
@@ -517,6 +504,14 @@
         @update-portal-url="handleUpdatePortalUrl"
       />
     </Transition>
+
+    <!-- Team Manager Modal -->
+    <TeamManager
+      v-if="token.auth_session"
+      :show="showTeamManager"
+      :auth-session="token.auth_session"
+      @close="showTeamManager = false"
+    />
   </Teleport>
 
   <!-- 复制选择弹窗 -->
@@ -534,6 +529,7 @@ import { useI18n } from 'vue-i18n'
 import ExternalLinkDialog from './ExternalLinkDialog.vue'
 import CreditUsageModal from './CreditUsageModal.vue'
 import CopyChoiceModal from './CopyChoiceModal.vue'
+import TeamManager from './TeamManager.vue'
 
 const { t } = useI18n()
 
@@ -581,6 +577,7 @@ const showTraeVersionDialog = ref(false)
 const showCopyMenu = ref(false)
 const showCreditUsageModal = ref(false)
 const showCopyChoiceModal = ref(false)
+const showTeamManager = ref(false)
 
 const DEFAULT_TAG_COLOR = '#f97316'
 
@@ -793,11 +790,18 @@ const balanceDisplay = computed(() => {
 
   if (!portalInfo.value.data) return ''
 
+  // 优先显示额度信息,即使账号被封禁或过期
+  const credits = portalInfo.value.data.credits_balance
+  if (credits !== undefined && credits !== null) {
+    return `${t('tokenCard.balance')}: ${credits}`
+  }
+
+  // 如果没有额度信息,才显示状态文本
   const status = props.token.ban_status
   if (status === 'EXPIRED') return t('tokenCard.expired')
   if (status === 'SUSPENDED') return t('tokenCard.banned')
-  const credits = portalInfo.value.data.credits_balance
-  return `${t('tokenCard.balance')}: ${credits}`
+
+  return ''
 })
 
 const remainingCredits = computed(() => {
@@ -1340,27 +1344,6 @@ const toggleBalanceColor = () => {
   emit('token-updated')
 }
 
-// 切换跳过检测状态
-const toggleSkipCheck = () => {
-  // 切换 skip_check 状态
-  props.token.skip_check = !props.token.skip_check
-
-  // 更新时间戳，确保双向同步时使用最新版本
-  props.token.updated_at = new Date().toISOString()
-
-  // 关闭菜单
-  showCheckMenu.value = false
-
-  // 通知父组件有更新
-  emit('token-updated')
-
-  // 显示提示
-  const message = props.token.skip_check
-    ? t('messages.checkDisabled')
-    : t('messages.checkEnabled')
-  window.$notify.info(message)
-}
-
 // 深度比对两个对象是否相等
 const isEqual = (obj1, obj2) => {
   if (obj1 === obj2) return true
@@ -1382,13 +1365,8 @@ const isEqual = (obj1, obj2) => {
 
 // 检测账号状态
 const checkAccountStatus = async (showNotification = true) => {
-  // 如果禁用了检测，静默返回
-  if (props.token.skip_check) {
-    return
-  }
-
-  // 如果正在检测中，或者批量检测中（且未禁用），则返回
-  if (isCheckingStatus.value || (props.isBatchChecking && !props.token.skip_check)) return
+  // 如果正在检测中或批量检测中，则返回
+  if (isCheckingStatus.value || props.isBatchChecking) return
 
   isCheckingStatus.value = true
 
@@ -1433,19 +1411,6 @@ const checkAccountStatus = async (showNotification = true) => {
       if (props.token.ban_status !== banStatus) {
         props.token.ban_status = banStatus
         hasChanges = true
-      }
-
-      // 自动禁用封禁或过期的账号检测
-      if ((banStatus === 'SUSPENDED' || banStatus === 'EXPIRED') && !props.token.skip_check) {
-        props.token.skip_check = true
-        hasChanges = true
-        // 通知父组件有更新，触发保存
-        emit('token-updated')
-        // 显示通知
-        const autoDisableMsg = banStatus === 'SUSPENDED'
-          ? t('messages.autoDisabledBanned')
-          : t('messages.autoDisabledExpired')
-        window.$notify.info(autoDisableMsg)
       }
 
       // 比对并更新 suspensions 信息（如果有）

@@ -501,18 +501,8 @@ pub async fn batch_check_account_status(
                     }
                 }
 
-                return TokenStatusResult {
-                    token_id,
-                    access_token: token,
-                    tenant_url,
-                    status_result,
-                    portal_info: None,
-                    portal_error: None,
-                    suspensions: suspensions_info,
-                    email_note: None,  // 封禁账号不获取邮箱
-                    portal_url: None,
-                    payment_method_link: None,
-                };
+                // 封禁账号也继续获取额度信息,不直接返回
+                println!("Account is banned but will continue to fetch portal info for {:?}", token_id);
             }
 
             // 4. 如果没有 portal_url 但有 auth_session，尝试获取 portal_url
@@ -658,7 +648,7 @@ pub async fn batch_check_account_status(
                 status_result,
                 portal_info,
                 portal_error,
-                suspensions: None,  // 正常情况下不需要 suspensions
+                suspensions: suspensions_info,  // 如果账号被封禁,包含封禁详情
                 email_note,
                 portal_url: fetched_portal_url,
                 payment_method_link: fetched_payment_method_link,

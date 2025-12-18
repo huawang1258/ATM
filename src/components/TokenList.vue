@@ -2799,10 +2799,8 @@ const checkAllAccountStatus = async () => {
   }
 
   try {
-    // 准备批量检测的数据，过滤掉标记为跳过检测的账号
-    const tokensToCheck = tokens.value.filter(token => !token.skip_check)
-
-    const tokenInfos = tokensToCheck.map(token => ({
+    // 准备批量检测的数据
+    const tokenInfos = tokens.value.map(token => ({
       id: token.id,
       access_token: token.access_token,
       tenant_url: token.tenant_url,
@@ -2858,17 +2856,6 @@ const updateTokensFromResults = (results) => {
       if (token.ban_status !== statusResult.status) {
         token.ban_status = statusResult.status
         hasChanges = true
-      }
-
-      // 自动禁用封禁或过期的账号检测
-      if ((statusResult.status === 'SUSPENDED' || statusResult.status === 'EXPIRED') && !token.skip_check) {
-        token.skip_check = true
-        hasChanges = true
-        // 显示通知
-        const autoDisableMsg = statusResult.status === 'SUSPENDED'
-          ? t('messages.autoDisabledBanned')
-          : t('messages.autoDisabledExpired')
-        window.$notify.info(autoDisableMsg)
       }
 
       // 比对并更新 suspensions 信息（如果有）
@@ -3632,7 +3619,6 @@ const addToken = (tokenData) => {
     tag_color: tagName ? tagColor : null,
     auth_session: tokenData.authSession || null,  // 添加 auth_session 字段
     suspensions: tokenData.suspensions || null,  // 添加 suspensions 字段
-    skip_check: false,  // 默认不跳过检测
     balance_color_mode: null  // 默认为 null，将使用绿色
   }
 
@@ -3735,16 +3721,13 @@ const handleClose = () => {
 
 // 检查当前页账号状态
 const checkPageAccountStatus = async () => {
-  // 获取当前页需要检测的tokens(过滤掉标记为跳过检测的)
-  const tokensToCheck = paginatedTokens.value.filter(token => !token.skip_check)
-
-  if (tokensToCheck.length === 0) {
+  if (paginatedTokens.value.length === 0) {
     return { hasChanges: false }
   }
 
   try {
     // 准备批量检测的数据
-    const tokenInfos = tokensToCheck.map(token => ({
+    const tokenInfos = paginatedTokens.value.map(token => ({
       id: token.id,
       access_token: token.access_token,
       tenant_url: token.tenant_url,
@@ -3783,17 +3766,6 @@ const checkPageAccountStatus = async () => {
         if (token.ban_status !== statusResult.status) {
           token.ban_status = statusResult.status
           tokenHasChanges = true
-        }
-
-        // 自动禁用封禁或过期的账号检测
-        if ((statusResult.status === 'SUSPENDED' || statusResult.status === 'EXPIRED') && !token.skip_check) {
-          token.skip_check = true
-          tokenHasChanges = true
-          // 显示通知
-          const autoDisableMsg = statusResult.status === 'SUSPENDED'
-            ? t('messages.autoDisabledBanned')
-            : t('messages.autoDisabledExpired')
-          window.$notify.info(autoDisableMsg)
         }
 
         // 比对并更新 suspensions 信息（如果有）

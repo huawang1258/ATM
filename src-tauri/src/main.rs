@@ -12,6 +12,7 @@ mod storage;
 mod http_client;
 mod proxy_config;
 mod proxy_helper;
+mod team_manager;
 
 use augment_oauth::{create_augment_oauth_state, generate_augment_authorize_url, complete_augment_oauth_flow, check_account_ban_status, batch_check_account_status, extract_token_from_session, get_batch_credit_consumption_with_app_session, AugmentOAuthState, AugmentTokenResponse, AccountStatus, TokenInfo, TokenStatusResult, BatchCreditConsumptionResponse};
 use augment_user_info::exchange_auth_session_for_app_session;
@@ -2524,8 +2525,60 @@ fn main() {
             // API 服务器管理命令
             get_api_server_status,
             start_api_server_cmd,
-            stop_api_server
+            stop_api_server,
+            // 团队管理命令
+            team_get_info,
+            team_invite_members,
+            team_remove_member,
+            team_cancel_invitation,
+            team_refresh_session,
+            team_refresh_session_with_current,
+            team_check_session_validity
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+// ==================== 团队管理命令 ====================
+
+/// 获取团队信息
+#[tauri::command]
+async fn team_get_info(auth_session: String) -> Result<team_manager::TeamResponse, String> {
+    team_manager::get_team_info(&auth_session).await
+}
+
+/// 邀请团队成员
+#[tauri::command]
+async fn team_invite_members(auth_session: String, emails: Vec<String>) -> Result<(), String> {
+    team_manager::invite_team_members(&auth_session, emails).await
+}
+
+/// 移除团队成员
+#[tauri::command]
+async fn team_remove_member(auth_session: String, user_id: String) -> Result<(), String> {
+    team_manager::remove_team_member(&auth_session, &user_id).await
+}
+
+/// 取消团队邀请
+#[tauri::command]
+async fn team_cancel_invitation(auth_session: String, invitation_id: String) -> Result<(), String> {
+    team_manager::cancel_team_invitation(&auth_session, &invitation_id).await
+}
+
+/// 刷新 session (使用 auth_session)
+#[tauri::command]
+async fn team_refresh_session(auth_session: String) -> Result<String, String> {
+    team_manager::refresh_session(&auth_session).await
+}
+
+/// 刷新 session (使用现有 session)
+#[tauri::command]
+async fn team_refresh_session_with_current(current_session: String) -> Result<String, String> {
+    team_manager::refresh_session_with_current(&current_session).await
+}
+
+/// 检查 session 有效性
+#[tauri::command]
+async fn team_check_session_validity(auth_session: String) -> Result<bool, String> {
+    team_manager::check_session_validity(&auth_session).await
 }

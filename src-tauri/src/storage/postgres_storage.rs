@@ -28,8 +28,8 @@ impl TokenStorage for PostgreSQLStorage {
         // 因此在 UPDATE 时显式设置 updated_at，触发器会被这个值覆盖
         client.execute(
             r#"
-            INSERT INTO tokens (id, tenant_url, access_token, created_at, updated_at, portal_url, email_note, tag_name, tag_color, ban_status, portal_info, auth_session, suspensions, balance_color_mode, skip_check)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+            INSERT INTO tokens (id, tenant_url, access_token, created_at, updated_at, portal_url, email_note, tag_name, tag_color, ban_status, portal_info, auth_session, suspensions, balance_color_mode)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
             ON CONFLICT (id) DO UPDATE SET
                 tenant_url = EXCLUDED.tenant_url,
                 access_token = EXCLUDED.access_token,
@@ -42,8 +42,7 @@ impl TokenStorage for PostgreSQLStorage {
                 portal_info = EXCLUDED.portal_info,
                 auth_session = EXCLUDED.auth_session,
                 suspensions = EXCLUDED.suspensions,
-                balance_color_mode = EXCLUDED.balance_color_mode,
-                skip_check = EXCLUDED.skip_check
+                balance_color_mode = EXCLUDED.balance_color_mode
             "#,
             &[
                 &token.id,
@@ -60,7 +59,6 @@ impl TokenStorage for PostgreSQLStorage {
                 &token.auth_session,
                 &token.suspensions,
                 &token.balance_color_mode,
-                &token.skip_check,
             ],
         ).await?;
 
@@ -72,7 +70,7 @@ impl TokenStorage for PostgreSQLStorage {
         let client = pool.get().await?;
 
         let rows = client.query(
-            "SELECT id, tenant_url, access_token, created_at, updated_at, portal_url, email_note, tag_name, tag_color, ban_status, portal_info, auth_session, suspensions, balance_color_mode, skip_check FROM tokens ORDER BY created_at DESC",
+            "SELECT id, tenant_url, access_token, created_at, updated_at, portal_url, email_note, tag_name, tag_color, ban_status, portal_info, auth_session, suspensions, balance_color_mode FROM tokens ORDER BY created_at DESC",
             &[],
         ).await?;
 
@@ -93,7 +91,6 @@ impl TokenStorage for PostgreSQLStorage {
                 auth_session: row.get(11),
                 suspensions: row.get(12),
                 balance_color_mode: row.get(13),
-                skip_check: row.get(14),
             };
             tokens.push(token);
         }
@@ -121,8 +118,7 @@ impl TokenStorage for PostgreSQLStorage {
                 portal_info = $10,
                 auth_session = $11,
                 suspensions = $12,
-                balance_color_mode = $13,
-                skip_check = $14
+                balance_color_mode = $13
             WHERE id = $1
             "#,
             &[
@@ -139,7 +135,6 @@ impl TokenStorage for PostgreSQLStorage {
                 &token.auth_session,
                 &token.suspensions,
                 &token.balance_color_mode,
-                &token.skip_check,
             ],
         ).await?;
 
@@ -167,7 +162,7 @@ impl TokenStorage for PostgreSQLStorage {
         let client = pool.get().await?;
 
         let rows = client.query(
-            "SELECT id, tenant_url, access_token, created_at, updated_at, portal_url, email_note, tag_name, tag_color, ban_status, portal_info, auth_session, suspensions, balance_color_mode, skip_check FROM tokens WHERE id = $1",
+            "SELECT id, tenant_url, access_token, created_at, updated_at, portal_url, email_note, tag_name, tag_color, ban_status, portal_info, auth_session, suspensions, balance_color_mode FROM tokens WHERE id = $1",
             &[&token_id],
         ).await?;
 
@@ -187,7 +182,6 @@ impl TokenStorage for PostgreSQLStorage {
                 auth_session: row.get(11),
                 suspensions: row.get(12),
                 balance_color_mode: row.get(13),
-                skip_check: row.get(14),
             };
             Ok(Some(token))
         } else {
@@ -227,7 +221,7 @@ impl PostgreSQLStorage {
 
         // 使用 LOWER() 进行不区分大小写的比较
         let rows = client.query(
-            "SELECT id, tenant_url, access_token, created_at, updated_at, portal_url, email_note, tag_name, tag_color, ban_status, portal_info, auth_session, suspensions, balance_color_mode, skip_check FROM tokens WHERE LOWER(TRIM(email_note)) = LOWER($1) AND id != $2",
+            "SELECT id, tenant_url, access_token, created_at, updated_at, portal_url, email_note, tag_name, tag_color, ban_status, portal_info, auth_session, suspensions, balance_color_mode FROM tokens WHERE LOWER(TRIM(email_note)) = LOWER($1) AND id != $2",
             &[&email, &exclude_token_id],
         ).await?;
 
@@ -248,7 +242,6 @@ impl PostgreSQLStorage {
                 auth_session: row.get(11),
                 suspensions: row.get(12),
                 balance_color_mode: row.get(13),
-                skip_check: row.get(14),
             };
             tokens.push(token);
         }

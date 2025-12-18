@@ -232,7 +232,6 @@ async fn import_session_handler(
                 auth_session: Some(request.session.clone()),
                 suspensions: None,  // Session 导入不再获取 suspensions
                 balance_color_mode: None,
-                skip_check: Some(false),  // 与前端保持一致，默认不跳过检测
             };
 
             // 保存到存储
@@ -421,7 +420,6 @@ async fn import_sessions_handler(
                         auth_session: Some(session.clone()),
                         suspensions: None,  // Session 导入不再获取 suspensions
                         balance_color_mode: None,
-                        skip_check: Some(false),  // 与前端保持一致，默认不跳过检测
                     };
 
                     // 保存到存储
